@@ -1,0 +1,411 @@
+---
+title: "EFN-BACK Behavioral Analyses"
+output: html_notebook
+---
+
+```{r}
+
+####### This script analyzes behavoiral data for EFN_BACK task
+####### Created by Feng Gu in March 2019. Modified by Feng Gu in June 2020. 
+
+
+########################################## SETTING UP ##############################################
+
+rm(list = ls())
+
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(reshape2)
+library(lme4)
+library(lmerTest)
+
+efn <- lapply(Sys.glob("~/Documents/CRANI/Active_Studies/CogRehab/Data/MRI_data/fMRI_behavioral_data/EFN_BACK/*/*.txt"), read.delim, stringsAsFactors=FALSE)
+
+for (i in 1: length(efn)) {
+
+efn[[i]]$PicList <- gsub("PicListNeg.", "Negative", efn[[i]]$PicList)
+efn[[i]]$PicList <- gsub("PicListNeu.", "Neutral", efn[[i]]$PicList)
+#use wildcard to rename PicList into two emotion conditions (negative vs. neutral) 
+
+# accuracy rate overall 
+efn[[i]]$acc_overall <- sum(efn[[i]]$Slide3.ACC == "1")/nrow(efn[[i]])
+
+# accuracy rate one back
+efn[[i]]$acc_ob <- sum(subset(efn[[i]], efn[[i]]$ListType == "1-Back")$Slide3.ACC == 1)/nrow(subset(efn[[i]], efn[[i]]$ListType == "1-Back"))
+
+# accuracy rate two back
+efn[[i]]$acc_tb <- sum(subset(efn[[i]], efn[[i]]$ListType == "2-Back")$Slide3.ACC == 1)/nrow(subset(efn[[i]], efn[[i]]$ListType == "2-Back"))
+
+# accuracy rate negative
+efn[[i]]$acc_neg <- sum(subset(efn[[i]], efn[[i]]$PicList == "Negative")$Slide3.ACC == 1)/nrow(subset(efn[[i]], efn[[i]]$PicList == "Negative"))
+
+# accuracy rate neutral
+efn[[i]]$acc_neu <- sum(subset(efn[[i]], efn[[i]]$PicList == "Neutral")$Slide3.ACC == 1)/nrow(subset(efn[[i]], efn[[i]]$PicList == "Neutral"))
+
+# accuracy rate one back negative
+efn[[i]]$acc_ob_neg <- sum(subset(efn[[i]], efn[[i]]$ListType == "1-Back" & efn[[i]]$PicList == "Negative")$Slide3.ACC == 1)/nrow(subset(efn[[i]], efn[[i]]$ListType == "1-Back" & efn[[i]]$PicList == "Negative"))
+
+# accuracy rate one back neutral
+efn[[i]]$acc_ob_neu <- sum(subset(efn[[i]], efn[[i]]$ListType == "1-Back" & efn[[i]]$PicList == "Neutral")$Slide3.ACC == 1)/nrow(subset(efn[[i]], efn[[i]]$ListType == "1-Back" & efn[[i]]$PicList == "Neutral"))
+
+# accuracy rate two back negative
+efn[[i]]$acc_tb_neg <- sum(subset(efn[[i]], efn[[i]]$ListType == "2-Back" & efn[[i]]$PicList == "Negative")$Slide3.ACC == 1)/nrow(subset(efn[[i]], efn[[i]]$ListType == "2-Back" & efn[[i]]$PicList == "Negative"))
+
+# accuracy rate two back neutral
+efn[[i]]$acc_tb_neu <- sum(subset(efn[[i]], efn[[i]]$ListType == "2-Back" & efn[[i]]$PicList == "Neutral")$Slide3.ACC == 1)/nrow(subset(efn[[i]], efn[[i]]$ListType == "2-Back" & efn[[i]]$PicList == "Neutral"))
+
+
+# d' overall
+efn[[i]]$hit_overall <- ifelse(efn[[i]]$LetterLevel == "Target" & efn[[i]]$Slide3.ACC == 1, 1, 0) #correct hit
+efn[[i]]$fa_overall <- ifelse(efn[[i]]$LetterLevel == "Control" & efn[[i]]$Slide3.ACC == 0, 1, 0) #false alarm
+efn[[i]]$miss_overall <- ifelse(efn[[i]]$LetterLevel == "Target" & efn[[i]]$Slide3.ACC == 0, 1, 0) #miss
+efn[[i]]$cr_overall <- ifelse(efn[[i]]$LetterLevel == "Control" & efn[[i]]$Slide3.ACC == 1, 1, 0) #correct rejection
+
+efn[[i]]$fa_rate_overall <- sum(efn[[i]]$fa_overall)/(sum(efn[[i]]$fa_overall)+sum(efn[[i]]$cr_overall)) #calculate false alarm rate
+efn[[i]]$hit_rate_overall <- sum(efn[[i]]$hit_overall)/(sum(efn[[i]]$hit_overall)+sum(efn[[i]]$miss_overall)) #calculate hit rate  
+
+
+efn[[i]]$fa_rate_overall <- ifelse(efn[[i]]$fa_rate_overall == "0", 1/nrow(efn[[i]]),
+                             ifelse(efn[[i]]$fa_rate_overall == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$fa_rate_overall))
+
+efn[[i]]$hit_rate_overall <- ifelse(efn[[i]]$hit_rate_overall == "0", 1/nrow(efn[[i]]),
+                              ifelse(efn[[i]]$hit_rate_overall == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$hit_rate_overall))
+
+efn[[i]]$dprime_overall <- -qnorm(efn[[i]]$fa_rate_overall)-(-qnorm(efn[[i]]$hit_rate_overall))
+
+
+# d' one back
+efn[[i]]$hit_ob <- ifelse(subset(efn[[i]], efn[[i]]$ListType == "1-Back")$LetterLevel == "Target" & subset(efn[[i]], efn[[i]]$ListType == "1-Back")$Slide3.ACC == 1, 1, 0) #correct hit
+efn[[i]]$fa_ob <- ifelse(subset(efn[[i]], efn[[i]]$ListType == "1-Back")$LetterLevel == "Control" & subset(efn[[i]], efn[[i]]$ListType == "1-Back")$Slide3.ACC == 0, 1, 0) #false alarm
+efn[[i]]$miss_ob <- ifelse(subset(efn[[i]], efn[[i]]$ListType == "1-Back")$LetterLevel == "Target" & subset(efn[[i]], efn[[i]]$ListType == "1-Back")$Slide3.ACC == 0, 1, 0) #miss
+efn[[i]]$cr_ob <- ifelse(subset(efn[[i]], efn[[i]]$ListType == "1-Back")$LetterLevel == "Control" & subset(efn[[i]], efn[[i]]$ListType == "1-Back")$Slide3.ACC == 1, 1, 0) #correct rejection
+
+efn[[i]]$fa_rate_ob <- sum(efn[[i]]$fa_ob)/(sum(efn[[i]]$fa_ob)+sum(efn[[i]]$cr_ob)) #calculate false alarm rate
+efn[[i]]$hit_rate_ob <- sum(efn[[i]]$hit_ob)/(sum(efn[[i]]$hit_ob)+sum(efn[[i]]$miss_ob)) #calculate hit rate  
+
+
+efn[[i]]$fa_rate_ob <- ifelse(efn[[i]]$fa_rate_ob == "0", 1/nrow(efn[[i]]),
+                              ifelse(efn[[i]]$fa_rate_ob == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$fa_rate_ob))
+
+efn[[i]]$hit_rate_ob <- ifelse(efn[[i]]$hit_rate_ob == "0", 1/nrow(efn[[i]]),
+                               ifelse(efn[[i]]$hit_rate_ob == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$hit_rate_ob))
+
+efn[[i]]$dprime_ob <- -qnorm(efn[[i]]$fa_rate_ob)-(-qnorm(efn[[i]]$hit_rate_ob))
+
+
+# d' two back
+efn[[i]]$hit_tb <- ifelse(subset(efn[[i]], efn[[i]]$ListType == "2-Back")$LetterLevel == "Target" & subset(efn[[i]], efn[[i]]$ListType == "2-Back")$Slide3.ACC == 1, 1, 0) #correct hit
+efn[[i]]$fa_tb <- ifelse(subset(efn[[i]], efn[[i]]$ListType == "2-Back")$LetterLevel == "Control" & subset(efn[[i]], efn[[i]]$ListType == "2-Back")$Slide3.ACC == 0, 1, 0) #false alarm
+efn[[i]]$miss_tb <- ifelse(subset(efn[[i]], efn[[i]]$ListType == "2-Back")$LetterLevel == "Target" & subset(efn[[i]], efn[[i]]$ListType == "2-Back")$Slide3.ACC == 0, 1, 0) #miss
+efn[[i]]$cr_tb <- ifelse(subset(efn[[i]], efn[[i]]$ListType == "2-Back")$LetterLevel == "Control" & subset(efn[[i]], efn[[i]]$ListType == "2-Back")$Slide3.ACC == 1, 1, 0) #correct rejection
+
+efn[[i]]$fa_rate_tb <- sum(efn[[i]]$fa_tb)/(sum(efn[[i]]$fa_tb)+sum(efn[[i]]$cr_tb)) #calculate false alarm rate
+efn[[i]]$hit_rate_tb <- sum(efn[[i]]$hit_tb)/(sum(efn[[i]]$hit_tb)+sum(efn[[i]]$miss_tb)) #calculate hit rate  
+
+
+efn[[i]]$fa_rate_tb <- ifelse(efn[[i]]$fa_rate_tb == "0", 1/nrow(efn[[i]]),
+                         ifelse(efn[[i]]$fa_rate_tb == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$fa_rate_tb))
+
+efn[[i]]$hit_rate_tb <- ifelse(efn[[i]]$hit_rate_tb == "0", 1/nrow(efn[[i]]),
+                          ifelse(efn[[i]]$hit_rate_tb == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$hit_rate_tb))
+
+efn[[i]]$dprime_tb <- -qnorm(efn[[i]]$fa_rate_tb)-(-qnorm(efn[[i]]$hit_rate_tb))
+
+
+# d' negative
+efn[[i]]$hit_neg <- ifelse(subset(efn[[i]], efn[[i]]$PicList == "Negative")$LetterLevel == "Target" & subset(efn[[i]], efn[[i]]$PicList == "Negative")$Slide3.ACC == 1, 1, 0) #correct hit
+efn[[i]]$fa_neg <- ifelse(subset(efn[[i]], efn[[i]]$PicList == "Negative")$LetterLevel == "Control" & subset(efn[[i]], efn[[i]]$PicList == "Negative")$Slide3.ACC == 0, 1, 0) #false alarm
+efn[[i]]$miss_neg <- ifelse(subset(efn[[i]], efn[[i]]$PicList == "Negative")$LetterLevel == "Target" & subset(efn[[i]], efn[[i]]$PicList == "Negative")$Slide3.ACC == 0, 1, 0) #miss
+efn[[i]]$cr_neg <- ifelse(subset(efn[[i]], efn[[i]]$PicList == "Negative")$LetterLevel == "Control" & subset(efn[[i]], efn[[i]]$PicList == "Negative")$Slide3.ACC == 1, 1, 0) #correct rejection
+
+efn[[i]]$fa_rate_neg <- sum(efn[[i]]$fa_neg)/(sum(efn[[i]]$fa_neg)+sum(efn[[i]]$cr_neg)) #calculate false alarm rate
+efn[[i]]$hit_rate_neg <- sum(efn[[i]]$hit_neg)/(sum(efn[[i]]$hit_neg)+sum(efn[[i]]$miss_neg)) #calculate hit rate  
+
+
+efn[[i]]$fa_rate_neg <- ifelse(efn[[i]]$fa_rate_neg == "0", 1/nrow(efn[[i]]),
+                         ifelse(efn[[i]]$fa_rate_neg == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$fa_rate_neg))
+
+efn[[i]]$hit_rate_neg <- ifelse(efn[[i]]$hit_rate_neg == "0", 1/nrow(efn[[i]]),
+                          ifelse(efn[[i]]$hit_rate_neg == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$hit_rate_neg))
+
+efn[[i]]$dprime_neg <- -qnorm(efn[[i]]$fa_rate_neg)-(-qnorm(efn[[i]]$hit_rate_neg))
+
+
+# d' neutral 
+efn[[i]]$hit_neu <- ifelse(subset(efn[[i]], efn[[i]]$PicList == "Neutral")$LetterLevel == "Target" & subset(efn[[i]], efn[[i]]$PicList == "Neutral")$Slide3.ACC == 1, 1, 0) #correct hit
+efn[[i]]$fa_neu <- ifelse(subset(efn[[i]], efn[[i]]$PicList == "Neutral")$LetterLevel == "Control" & subset(efn[[i]], efn[[i]]$PicList == "Neutral")$Slide3.ACC == 0, 1, 0) #false alarm
+efn[[i]]$miss_neu <- ifelse(subset(efn[[i]], efn[[i]]$PicList == "Neutral")$LetterLevel == "Target" & subset(efn[[i]], efn[[i]]$PicList == "Neutral")$Slide3.ACC == 0, 1, 0) #miss
+efn[[i]]$cr_neu <- ifelse(subset(efn[[i]], efn[[i]]$PicList == "Neutral")$LetterLevel == "Control" & subset(efn[[i]], efn[[i]]$PicList == "Neutral")$Slide3.ACC == 1, 1, 0) #correct rejection
+
+efn[[i]]$fa_rate_neu <- sum(efn[[i]]$fa_neu)/(sum(efn[[i]]$fa_neu)+sum(efn[[i]]$cr_neu)) #calculate false alarm rate
+efn[[i]]$hit_rate_neu <- sum(efn[[i]]$hit_neu)/(sum(efn[[i]]$hit_neu)+sum(efn[[i]]$miss_neu)) #calculate hit rate  
+
+
+efn[[i]]$fa_rate_neu <- ifelse(efn[[i]]$fa_rate_neu == "0", 1/nrow(efn[[i]]),
+                          ifelse(efn[[i]]$fa_rate_neu == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$fa_rate_neu))
+
+efn[[i]]$hit_rate_neu <- ifelse(efn[[i]]$hit_rate_neu == "0", 1/nrow(efn[[i]]),
+                           ifelse(efn[[i]]$hit_rate_neu == "1", (nrow(efn[[i]])-1)/nrow(efn[[i]]), efn[[i]]$hit_rate_neu))
+
+efn[[i]]$dprime_neu <- -qnorm(efn[[i]]$fa_rate_neu)-(-qnorm(efn[[i]]$hit_rate_neu))
+
+
+
+# RT overall 
+efn[[i]]$RT_overall <- mean(efn[[i]]$Slide3.RT)
+
+# RT one back 
+efn[[i]]$RT_ob <- mean(subset(efn[[i]], efn[[i]]$ListType == "1-Back")$Slide3.RT)
+
+# RT two back 
+efn[[i]]$RT_tb <- mean(subset(efn[[i]], efn[[i]]$ListType == "2-Back")$Slide3.RT)
+
+# RT negative 
+efn[[i]]$RT_neg <- mean(subset(efn[[i]], efn[[i]]$PicList== "Negative")$Slide3.RT)
+
+# RT neutral
+efn[[i]]$RT_neu <- mean(subset(efn[[i]], efn[[i]]$PicList== "Neutral")$Slide3.RT)
+
+# RT one back negative
+efn[[i]]$RT_ob_neg <- mean(subset(efn[[i]], efn[[i]]$ListType == "1-Back" & efn[[i]]$PicList == "Negative")$Slide3.RT)
+
+# RT one back neutral 
+efn[[i]]$RT_ob_neu <- mean(subset(efn[[i]], efn[[i]]$ListType == "1-Back" & efn[[i]]$PicList == "Neutral")$Slide3.RT)
+
+# RT two back negative
+efn[[i]]$RT_tb_neg <- mean(subset(efn[[i]], efn[[i]]$ListType == "2-Back" & efn[[i]]$PicList == "Negative")$Slide3.RT)
+
+# RT two back neutral 
+efn[[i]]$RT_tb_neu <- mean(subset(efn[[i]], efn[[i]]$ListType == "2-Back" & efn[[i]]$PicList == "Neutral")$Slide3.RT)
+
+
+}
+
+efn <- bind_rows(efn)
+
+attach(efn)
+efn <- data.frame(Subject, Session, acc_overall, acc_ob, acc_tb, acc_neg, acc_neu, acc_ob_neg, acc_ob_neu, acc_tb_neg, acc_tb_neu, dprime_overall, dprime_ob, dprime_tb, dprime_neg, dprime_neu, RT_overall, RT_ob, RT_tb, RT_neg, RT_neu, RT_ob_neg, RT_ob_neu, RT_tb_neg, RT_tb_neu)
+detach(efn)
+
+
+efn$Subject <- sprintf("%03d", efn$Subject)
+efn$Subject <- paste("CR", efn$Subject)
+efn$Subject <- gsub(" ", "", efn$Subject)
+
+
+
+subjects <- as.list(which(efn$Subject != lag(efn$Subject)))
+for (i in 1:length(subjects)) {
+  efn[subjects[[i]],"flag"] <- "flag"
+}
+
+efn[1, "flag"] <- "flag"
+efn <- subset(efn, efn$flag == "flag")
+efn$flag <- NULL
+
+
+efn$Diagnosis <- ifelse(substr(efn$Subject, 3, 3) == "0", "HC",
+                 ifelse(substr(efn$Subject, 3, 3) == "1", "SZ", "MDD"))
+
+```
+
+
+<br>
+<br>
+<br>
+<br>
+
+***
+<center><font size="6"> <span style="color:#85c1e9"> **Accuracy Analysis** </span> </font> </center>
+###*<span style="color: #ec7063"> Linear mixed model for rate of accuracy with subject ID as a random factor (other fixed covariates: cognitive load, emotion type, diagnosis, and three-way interaction among them) </span>*
+
+```{r}
+
+################################# ACCURACY RATE ################################
+
+efn_acc <- melt(efn, id.vars = c("Subject", "Diagnosis"), measure.vars = c("acc_ob", "acc_tb", "acc_neu", "acc_neg"))
+efn_acc$aspect <- ifelse(efn_acc$variable == "acc_ob" | efn_acc$variable == "acc_tb", "Cognitive Load", "Emotion")
+
+
+efn_acc2 <- melt(efn, id.vars = c("Subject", "Diagnosis"), measure.vars = c("acc_ob_neu", "acc_ob_neg", "acc_tb_neu", "acc_tb_neg"))
+efn_acc2$load <- ifelse(substr(efn_acc2$variable, 5, 6) == "ob", "1-back", "2-back")
+efn_acc2$emotion <- ifelse(substr(efn_acc2$variable, 8, 10) == "neu", "Neutral", "Negative")
+efn_acc2$emotion <- factor(efn_acc2$emotion, levels = c("Neutral", "Negative"))
+
+
+model_acc <- lmer(value ~ load + emotion + Diagnosis + load*emotion*Diagnosis + (1|Subject), efn_acc2)
+summary(model_acc)
+
+
+
+acc <- ggplot(efn_acc, aes(y=value, x=Diagnosis)) +
+  geom_point(aes(colour=variable), position=position_jitter(w=.3, h=.001), alpha=.3, size = 3) +
+  geom_boxplot(aes(colour=variable), width=.5, alpha=.5, outlier.shape=NA)  +
+  facet_grid(. ~ aspect) +
+  scale_colour_viridis_d(
+    begin=.1,end=.9,     
+    na.translate=FALSE,  # use this command so "NA" values in the data don't get their own colour
+    labels=c("1-back","2-back", "Neutral Emotion", "Negative Emotion")) +
+  scale_y_continuous(name="Rate of Accuracy") +
+  theme(panel.background = element_rect(fill = "white"), panel.border = element_rect(fill = NA, colour = "black"),
+        axis.text = element_text(size = 20), axis.title=element_text(face = "bold", size=20)) +
+  theme(strip.text.x = element_text(size = 18)) +
+  theme(axis.title.y = element_text(face = "bold", size=25, margin=margin(r=10))) +
+  theme(axis.title.x = element_text(face = "bold", size=25, margin=margin(t=15))) +
+  theme(legend.title = element_blank(),
+        legend.text = element_text(size = 20))
+
+
+
+acc2 <- ggplot(efn_acc2, aes(y=value, x=Diagnosis)) +
+  geom_point(aes(colour=variable), position=position_jitter(w=.3, h=.001), alpha=.3, size = 3) +
+  geom_boxplot(aes(colour=variable), width=.5, alpha=.5, outlier.shape=NA)  +
+  facet_grid(emotion ~ load) +
+  scale_colour_viridis_d(
+    begin=.1,end=.9,     
+    na.translate=FALSE) +# use this command so "NA" values in the data don't get their own colour
+  scale_y_continuous(name="Rate of Accuracy") +
+  theme(panel.background = element_rect(fill = "white"), panel.border = element_rect(fill = NA, colour = "black"),
+        axis.text = element_text(size = 20), axis.title=element_text(face = "bold", size=20)) +
+  theme(strip.text.x = element_text(size = 18)) +
+  theme(strip.text.y = element_text(size = 18)) +
+  theme(axis.title.y = element_text(face = "bold", size=25, margin=margin(r=10))) +
+  theme(axis.title.x = element_text(face = "bold", size=25, margin=margin(t=15))) +
+  theme(legend.position = "none")
+
+```
+
+<br>
+<br>
+
+###*<span style="color:#ec7063"> Figures for Accuracy Rates </span>*
+
+```{r fig1, fig.height=10, fig.width=15, fig.align="center"}
+acc
+```
+
+
+```{r fig2, fig.height=10, fig.width=15, fig.align="center"}
+acc2
+```
+
+
+
+<br>
+<br>
+<br>
+<br>
+
+***
+<center><font size="6"> <span style="color:#85c1e9"> **d'** </span> </font> </center>
+###*<span style="color: #ec7063"> Figure for d' </span>*
+
+```{r}
+############################## d' ###################################
+efn_dprime <- melt(efn, id.vars = c("Subject", "Diagnosis"), measure.vars = c("dprime_ob", "dprime_tb", "dprime_neu", "dprime_neg"))
+efn_dprime$aspect <- ifelse(efn_dprime$variable == "dprime_ob" | efn_dprime$variable == "dprime_tb", "Cognitive Load", "Emotion")
+
+
+dprime <- ggplot(efn_dprime, aes(y=value, x=Diagnosis)) +
+  geom_point(aes(colour=variable), position=position_jitter(w=.3, h=.001), alpha=.3, size = 3) +
+  geom_boxplot(aes(colour=variable), width=.5, alpha=.5, outlier.shape=NA)  +
+  facet_grid(. ~ aspect) +
+  scale_colour_viridis_d(
+    begin=.1,end=.9,     
+    na.translate=FALSE,  # use this command so "NA" values in the data don't get their own colour
+    labels=c("1-back","2-back", "Neutral Emotion", "Negative Emotion")) +
+  scale_y_continuous(name="d'") +
+  theme(panel.background = element_rect(fill = "white"), panel.border = element_rect(fill = NA, colour = "black"),
+        axis.text = element_text(size = 20), axis.title=element_text(face = "bold", size=20)) +
+  theme(strip.text.x = element_text(size = 18)) +
+  theme(axis.title.y = element_text(face = "bold", size=25, margin=margin(r=10))) +
+  theme(axis.title.x = element_text(face = "bold", size=25, margin=margin(t=15))) +
+  theme(legend.title = element_blank(),
+        legend.text = element_text(size = 20))
+
+```
+
+```{r fig3, fig.height=10, fig.width=15, fig.align="center"}
+dprime
+```
+
+
+
+
+<br>
+<br>
+<br>
+<br>
+
+***
+<center><font size="6"><span style="color:#85c1e9"> **RT Analysis** </span></font></center>
+###*<span style="color: #ec7063"> Linear mixed model for RT with subject ID as a random factor (other fixed covariates: cognitive load, emotion type, diagnosis, and three-way interaction among them) </span>*
+
+```{r}
+
+############################# RT #####################################
+
+efn_RT <- melt(efn, id.vars = c("Subject", "Diagnosis"), measure.vars = c("RT_ob", "RT_tb", "RT_neu", "RT_neg"))
+efn_RT$aspect <- ifelse(efn_RT$variable == "RT_ob" | efn_RT$variable == "RT_tb", "Cognitive Load", "Emotion")
+
+
+efn_RT2 <- melt(efn, id.vars = c("Subject", "Diagnosis"), measure.vars = c("RT_ob_neu", "RT_ob_neg", "RT_tb_neu", "RT_tb_neg"))
+efn_RT2$load <- ifelse(substr(efn_RT2$variable, 4, 5) == "ob", "1-back", "2-back")
+efn_RT2$emotion <- ifelse(substr(efn_RT2$variable, 7, 9) == "neu", "Neutral", "Negative")
+efn_RT2$emotion <- factor(efn_RT2$emotion, levels = c("Neutral", "Negative"))
+
+
+model_RT <- lmer(value ~ load + emotion + Diagnosis + load*emotion*Diagnosis + (1|Subject), efn_RT2)
+summary(model_RT)
+
+
+RT <- ggplot(efn_RT, aes(y=value, x=Diagnosis)) +
+  geom_point(aes(colour=variable), position=position_jitter(w=.3, h=.001), alpha=.3, size = 3) +
+  geom_boxplot(aes(colour=variable), width=.5, alpha=.5, outlier.shape=NA)  +
+  facet_grid(. ~ aspect) +
+  scale_colour_viridis_d(
+    begin=.1,end=.9,     
+    na.translate=FALSE,  # use this command so "NA" values in the data don't get their own colour
+    labels=c("1-back","2-back", "Neutral Emotion", "Negative Emotion")) +
+  scale_y_continuous(name="RT") +
+  theme(panel.background = element_rect(fill = "white"), panel.border = element_rect(fill = NA, colour = "black"),
+        axis.text = element_text(size = 20), axis.title=element_text(face = "bold", size=20)) +
+  theme(strip.text.x = element_text(size = 18)) +
+  theme(axis.title.y = element_text(face = "bold", size=25, margin=margin(r=10))) +
+  theme(axis.title.x = element_text(face = "bold", size=25, margin=margin(t=15))) +
+  theme(legend.title = element_blank(),
+        legend.text = element_text(size = 20))
+
+
+
+RT2 <- ggplot(efn_RT2, aes(y=value, x=Diagnosis)) +
+  geom_point(aes(colour=variable), position=position_jitter(w=.3, h=.001), alpha=.3, size = 3) +
+  geom_boxplot(aes(colour=variable), width=.5, alpha=.5, outlier.shape=NA)  +
+  facet_grid(emotion ~ load) +
+  scale_colour_viridis_d(
+    begin=.1,end=.9,     
+    na.translate=FALSE) +# use this command so "NA" values in the data don't get their own colour
+  scale_y_continuous(name="RT") +
+  theme(panel.background = element_rect(fill = "white"), panel.border = element_rect(fill = NA, colour = "black"),
+        axis.text = element_text(size = 20), axis.title=element_text(face = "bold", size=20)) +
+  theme(strip.text.x = element_text(size = 18)) +
+  theme(strip.text.y = element_text(size = 18)) +
+  theme(axis.title.y = element_text(face = "bold", size=25, margin=margin(r=10))) +
+  theme(axis.title.x = element_text(face = "bold", size=25, margin=margin(t=15))) +
+  theme(legend.position = "none")
+
+```
+
+<br>
+<br>
+
+###*<span style="color: #ec7063"> Figures for RT </span>*
+
+```{r fig4, fig.height=10, fig.width=15, fig.align="center"}
+RT
+```
+
+```{r fig5, fig.height=10, fig.width=15, fig.align="center"}
+RT2
+```

@@ -1,0 +1,282 @@
+---
+title: "VM Recognition Behavioral Analyses"
+output: html_notebook
+---
+
+```{r}
+
+####### This script analyzes behavoiral data for VM_recog task 
+####### Created by Feng Gu in March 2019. Modified by Feng Gu in June 2020. 
+
+########################################## SETTING UP ##############################################
+rm(list = ls())   #clear the environment
+
+#load the libraries
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(reshape2)
+library(lme4)
+library(lmerTest)
+
+#create a list of datasets using all text files in the VM_Recog folder (i.e., VM_recog outputs for all participants, including patients and controls)
+recog <-lapply(Sys.glob("~/Documents/CRANI/Active_Studies/CogRehab/Data/MRI_data/fMRI_behavioral_data/VM/VM_Recog/*/*.txt"), read.delim, stringsAsFactors=FALSE)
+
+
+for (i in 1:length(recog)){   #loop through every dataset in the list
+  
+  recog[[i]]$RecogStimulus.ACC <- as.numeric(recog[[i]]$RecogStimulus.ACC)   #make accuracy a numberic variable (to prepare for next step)
+  recog[[i]]$accuracy_raw_vm <- sum(recog[[i]]$RecogStimulus.ACC)   #make the sum of accuracy (1 vs. 0) accuracy_raw (i.e., total number of correct answers)
+  recog[[i]]$accuracy_rate_vm <- sum(recog[[i]]$RecogStimulus.ACC)/nrow(recog[[i]])  #create a variable accuracy_rate using accuracy_raw divided by total number of stimuli
+  
+  
+  recog[[i]]$error_related <- ifelse(recog[[i]]$Category == "NewRelated" & recog[[i]]$RecogStimulus.ACC == 0, 1, 0) #mark errors in the category NewRelated
+  recog[[i]]$error_unrelated <- ifelse(recog[[i]]$Category == "NewUnrelated" & recog[[i]]$RecogStimulus.ACC == 0, 1, 0) #mark errors in the category NewUnrelated
+  recog[[i]]$error_related_total <- sum(recog[[i]]$error_related) #total number of errors in the category NewRelated
+  recog[[i]]$error_unrelated_total <- sum(recog[[i]]$error_unrelated) #total number of erros in the category NewUnrelated
+  
+  
+  recog[[i]]$hit <- ifelse(recog[[i]]$Category == "OldRelated" & recog[[i]]$RecogStimulus.ACC == 1, 1, 0) #correct hit (correct answers for words from the encoding lists)
+  recog[[i]]$fa <- ifelse(recog[[i]]$Category == "NewRelated" & recog[[i]]$RecogStimulus.ACC == 0, 1, 
+                          ifelse(recog[[i]]$Category == "NewUnrelated" & recog[[i]]$RecogStimulus.ACC == 0, 1, 0)) #false alarm (wrong answers for new words)
+  recog[[i]]$miss <- ifelse(recog[[i]]$Category == "OldRelated" & recog[[i]]$RecogStimulus.ACC == 0, 1, 0) #miss (wrong answers for words from the encoding lists)
+  recog[[i]]$cr <- ifelse(recog[[i]]$Category == "NewRelated" & recog[[i]]$RecogStimulus.ACC == 1, 1, 
+                          ifelse(recog[[i]]$Category == "NewUnrelated" & recog[[i]]$RecogStimulus.ACC == 1, 1, 0)) #correct rejection (correct answers for new words)
+  
+  
+  recog[[i]]$hit_total <- sum(recog[[i]]$hit) #total number of hits
+  recog[[i]]$fa_total <- sum(recog[[i]]$fa) #total number of false alarms
+  recog[[i]]$cr_total <- sum(recog[[i]]$cr) #total number of correct rejections
+  recog[[i]]$miss_total <- sum(recog[[i]]$miss) #total number of misses
+  
+  recog[[i]]$fa_rate <- sum(recog[[i]]$fa)/(sum(recog[[i]]$fa)+sum(recog[[i]]$cr)) #calculate false alarm rate (fa_total/fa_total+cr_total)
+  
+  recog[[i]]$hit_rate <-  sum(recog[[i]]$hit)/(sum(recog[[i]]$hit)+sum(recog[[i]]$miss)) #calculate hit rate (hit_total/hit_total+miss_total)
+  
+  
+  #avoid values of zeros and ones in false alarm rate and hit rate (otherwise producing z scores of infinitely)
+  #A conventional adjustment is to set the minimum p = 1/N where N is the number of trials used in the calculation of p. Similarly, we can set the maximum value for p = (N-1)/N.
+  
+  recog[[i]]$fa_rate <- ifelse(recog[[i]]$fa_rate == "0", 1/nrow(recog[[i]]),
+                        ifelse(recog[[i]]$fa_rate == "1", (nrow(recog[[i]])-1)/nrow(recog[[i]]), recog[[i]]$fa_rate))
+  recog[[i]]$hit_rate <- ifelse(recog[[i]]$hit_rate == "0", 1/nrow(recog[[i]]),
+                         ifelse(recog[[i]]$hit_rate == "1", (nrow(recog[[i]])-1)/nrow(recog[[i]]), recog[[i]]$hit_rate))
+
+  recog[[i]]$dprime <- -qnorm(recog[[i]]$fa_rate)-(-qnorm(recog[[i]]$hit_rate))  #calculate d' (hit rate - false alarm rate)
+  
+  
+  #### RT
+  recog[[i]]$RT_overall <- mean(subset(recog[[i]], RecogStimulus.ACC == 1)$RecogStimulus.RT)   #mean RT across all correct answers for all conditions
+  recog[[i]]$RT_OldRelated <-  mean(subset(recog[[i]], RecogStimulus.ACC == 1 & Category == "OldRelated")$RecogStimulus.RT) #mean RT for correct answers for OldRelated 
+  recog[[i]]$RT_NewRelated <-  mean(subset(recog[[i]], RecogStimulus.ACC == 1 & Category == "NewRelated")$RecogStimulus.RT) #mean RT for correct answers for NewRelated
+  recog[[i]]$RT_NewUnrelated <- mean(subset(recog[[i]], RecogStimulus.ACC == 1 & Category == "NewUnrelated")$RecogStimulus.RT) #mean RT for correct answers for NewUnrelated
+
+  }
+
+recog <- bind_rows(recog) #create a data frame that contains all datasets in the loop
+
+#keep only the relavant variables for next step 
+attach(recog)
+recog <- data.frame(Subject, Session, accuracy_raw_vm, accuracy_rate_vm, fa_rate, hit_rate, fa_total, hit_total, cr_total, miss_total, dprime, error_related_total, error_unrelated_total, RT_overall, RT_OldRelated, RT_NewRelated, RT_NewUnrelated)
+detach(recog)
+
+recog$Subject <- sprintf("%03d", recog$Subject)  #add leading 0's to subject ID to make ID's 3-digit numbers (e.g., change 1 to 001)
+recog$Subject <- paste("CR", recog$Subject) #add CR at the beginning of subject ID (e.g., change 001 to CR 001)
+recog$Subject <- gsub(" ", "", recog$Subject) #remove space in subject ID (e.g., change CR 001 to CR001)
+
+recog$Diagnosis <- ifelse(substr(recog$Subject, 3, 3) == "0", "HC", 
+                   ifelse(substr(recog$Subject, 3, 3) == "1", "SZ", "MDD"))    
+#Create a variable for Diagnosis (if the third character in ID is 0, then it's HC; if it's 1, then it's SZ; otherwise it's MDD)
+
+
+###keep only the first row of data for each participant
+recog <- recog[order(recog$Subject),] #sort dataset by subject ID
+
+subjects <- as.list(which(recog$Subject != lag(recog$Subject))) #create a list of row numbers where the subject ID changes from the previous row
+
+for (i in 1:length(subjects)){
+  recog[subjects[[i]], "flag"] <- "flag"
+}  #loop through the list of row numbers, and flag each row in the dataset   
+
+recog[1, "flag"] <- "flag"  #also need to flag the first row (for the first participant)
+recog <- subset(recog, recog$flag == "flag") #keep only the rows that are flagged
+recog$flag <- NULL  #remove the variable "flag"
+```
+
+<br>
+<br>
+<br>
+<br>
+
+***
+<center><font size="6"> <span style="color:#85c1e9"> **Accuracy Analysis** </span> </font> </center>
+###*<span style="color:#ec7063"> one-way ANOVA for d' across diagnoses</span>*
+
+```{r}
+################################## ACCURACY ######################################
+
+# d'
+aov_dprime <- aov(dprime ~ Diagnosis, recog)   #create a model for one-way ANOVA for d', with Diagnosis as IV
+summary(aov_dprime) #results of one-way ANOVA for d'
+
+# post-hoc pairwise comparison
+TukeyHSD(aov_dprime)
+
+# Box plot with distribution of data points for d' across different diagnoses
+dprime <- ggplot(recog, aes(y=dprime, x=Diagnosis)) +
+  geom_point(alpha=.3, colour="royalblue4", size = 2.5) +
+  geom_boxplot(aes(group=Diagnosis), width=.5, alpha=.5, outlier.shape=NA, colour="#7fb3d5") +
+  scale_y_continuous(name="d'") +
+  theme(panel.background = element_rect(fill = "white"), panel.border = element_rect(fill = NA, colour = "black"),
+        axis.text = element_text(size = 20), axis.title=element_text(face = "bold", size=20)) +
+  theme(axis.title.y = element_text(face = "bold", size=25, margin=margin(r=10))) +
+  theme(axis.title.x = element_text(face = "bold", size=25, margin=margin(t=15)))
+```
+
+<br>
+<br>
+
+###*<span style="color:#ec7063"> Figure for d' </span>*
+
+```{r figl1, fig.height=10, fig.width=15, fig.align="center"}
+dprime  #show figure 
+```
+
+<br>
+<br>
+<br>
+
+***
+###*<span style="color:#ec7063"> one-way ANOVA for accuracy rate across diagnoses</span>*
+
+
+```{r}
+
+### accuracy rate
+
+aov_acc_rate <- aov(accuracy_rate_vm ~ Diagnosis, recog)  #create a one-way ANOVA model for accuracy rate, with Diagnosis as IV
+summary(aov_acc_rate) #check results of ANOVA
+
+# post-hoc pairwise comparison
+TukeyHSD(aov_acc_rate)
+
+# Box plot with distribution of data points for accuracy rates across different diagnoses
+acc_rate <- ggplot(recog, aes(y=accuracy_rate_vm, x=Diagnosis)) +
+  geom_point(alpha=.3, colour="royalblue4", size = 2.5) +
+  geom_boxplot(aes(group=Diagnosis), width=.5, alpha=.5, outlier.shape=NA, colour="#7fb3d5") +
+  scale_y_continuous(name="Accuracy Rate") +
+  theme(panel.background = element_rect(fill = "white"), panel.border = element_rect(fill = NA, colour = "black"),
+        axis.text = element_text(size = 20), axis.title=element_text(face = "bold", size=20)) +
+  theme(axis.title.y = element_text(face = "bold", size=25, margin=margin(r=10))) +
+  theme(axis.title.x = element_text(face = "bold", size=25, margin=margin(t=15)))
+
+```
+<br>
+<br>
+
+###*<span style="color:#ec7063"> Figure for accuracy rate </span>*
+
+```{r figl2, fig.height=10, fig.width=15, fig.align="center"}
+acc_rate  #show figure
+```
+
+
+
+<br>
+<br>
+<br>
+<br>
+
+***
+<center><font size="6"><span style="color:#85c1e9"> **Error Analysis** </span></font></center>
+###*<span style="color: #ec7063"> Linear mixed model with subject ID as a random factor (other fixed covariates: diagnoses, error types and interaction between the two) </span>*
+
+```{r}
+################# TYPES OF ERRORS #############
+
+#transpose dataset to include 4 variables (subject ID, Diagnosis, type of error, number of error)
+recog_error <- melt(recog, id.vars = c("Subject", "Diagnosis"), measure.vars = c("error_related_total", "error_unrelated_total", "miss_total"))
+
+#create a linear mixed model with subject ID as a random factor, and with diagnoses, error types and interaction between the two as fixed covariates. 
+model_error <- lmer(value ~ variable + Diagnosis + variable*Diagnosis + (1|Subject), recog_error)
+summary(model_error) #check the results of this model
+
+# Box plot with distribution of data points for error types and error numbers across different diagnoses
+error <- ggplot(recog_error, aes(y=value, x=Diagnosis)) +
+  geom_point(aes(colour=variable), position=position_jitter(w=.3,h=.05), alpha=.3, size = 3) +
+  geom_boxplot(aes(colour=variable), width=.5, alpha=.5, outlier.shape=NA) +
+  scale_colour_viridis_d(
+    begin=.1,end=.9,     
+    na.translate=FALSE,  # use this command so "NA" values in the data don't get their own colour
+    name="Type of Error",
+    labels=c("False Alarm: New Related", "False Alarm: New Unrelated", "Miss")) +
+  scale_y_continuous(name="Number of Errors") +
+  theme(panel.background = element_rect(fill = "white"), panel.border = element_rect(fill = NA, colour = "black"),
+        axis.text = element_text(size = 20), axis.title=element_text(face = "bold", size=20)) +
+  theme(axis.title.y = element_text(face = "bold", size=25, margin=margin(r=10))) +
+  theme(axis.title.x = element_text(face = "bold", size=25, margin=margin(t=15))) +
+  theme(legend.title = element_text(size = 20),
+        legend.text = element_text(size = 20))
+```
+
+
+<br>
+<br>
+
+###*<span style="color:#ec7063"> Figure for Number of Errors </span>*
+
+```{r figl3, fig.height=10, fig.width=15, fig.align="center"}
+error #show figure
+```
+
+
+
+
+<br>
+<br>
+<br>
+<br>
+
+***
+<center><font size="6"><span style="color:#85c1e9"> **RT Analysis** </span></font></center>
+###*<span style="color: #ec7063"> Linear mixed model with subject ID as a random factor (other fixed covariates: diagnoses, stimulus types and interaction between the two) </span>*
+
+
+```{r}
+################## RT ###################
+
+#transpose dataset to include 4 variables (subject ID, Diagnosis, stimulus types (conditions), value for RT)
+recog_long <- melt(data = recog, id.vars = c("Subject", "Diagnosis"), measure.vars = c("RT_OldRelated", "RT_NewRelated", "RT_NewUnrelated"))
+
+#create a linear mixed model with subject ID as a random factor, and with diagnoses, conditions and interaction between the two as fixed covariates.
+model_rt <- lmer(value ~ variable + Diagnosis + variable*Diagnosis + (1|Subject), recog_long)
+summary(model_rt) #restuls of the model
+
+
+# Box plot with distribution of data points for RT across different diagnoses and different conditions
+RT <- ggplot(recog_long, aes(y=value, x=Diagnosis)) +
+  geom_point(aes(colour=variable), position=position_jitter(w=.35,h=.1), alpha=.3, size = 3) +
+  geom_boxplot(aes(colour=variable), width=.5, alpha=.5, outlier.shape=NA) +
+  scale_colour_viridis_d(
+    begin=.1,end=.9,     
+    na.translate=FALSE,  # use this command so "NA" values in the data don't get their own colour
+    name="Stimulus Type",
+    labels=c("Old Related","New Related", "New Unrelated")) +
+  scale_y_continuous(name="RT") +
+  theme(panel.background = element_rect(fill = "white"), panel.border = element_rect(fill = NA, colour = "black"),
+        axis.text = element_text(size = 20), axis.title=element_text(face = "bold", size=20)) +
+  theme(axis.title.y = element_text(face = "bold", size=25, margin=margin(r=10))) +
+  theme(axis.title.x = element_text(face = "bold", size=25, margin=margin(t=15))) +
+  theme(legend.title = element_text(size = 20),
+        legend.text = element_text(size = 20))
+
+```
+
+<br>
+<br>
+
+###*<span style="color:#ec7063"> Figure for RT </span>*
+
+```{r figl4, fig.height=10, fig.width=15, fig.align="center"}
+RT #show figure
+```
